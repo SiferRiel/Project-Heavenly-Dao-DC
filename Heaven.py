@@ -318,7 +318,7 @@ async def on_message(message: discord.Message):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     user_id = str(message.author.id)
     last_reward = message_reward_cooldowns.get(user_id)
-    if last_reward and (now - last_reward).total_seconds() < 60:
+    if last_reward and (now - last_reward).total_seconds() < 120:
         return
 
     doc = cultivators.find_one({"_id": user_id})
@@ -332,14 +332,10 @@ async def on_message(message: discord.Message):
     current_rank_data = get_rank_data(doc.get("qi", 0))
     aperture_cap = current_rank_data["aperture"]
 
-    base_qi = random.randint(5, 15)
-    qi_gain = int((base_qi + (rank_index**1.95 * 12)) * (1 + (luck / 100)))
+    base_qi = random.randint(3, 8)
+    qi_gain = int((base_qi + (rank_index* 8)) * (1 + (luck / 100)))
 
-    base_souls = random.randint(1, 2)
-    if rank_index < 4:
-        soul_gain = int(base_souls + (rank_index * 1.5))
-    else:
-        soul_gain = int(base_souls + ((rank_index - 3)**2.5 * 15))
+    soul_gain = random.randint(3, 8) + (rank_index * 3)
 
     new_qi = min(doc.get("qi", 0) + qi_gain, aperture_cap)
 
