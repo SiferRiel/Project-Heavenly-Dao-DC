@@ -32,7 +32,6 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-
 load_dotenv()
 # ─────────────────────────────────────────────
 # CONFIG
@@ -1357,5 +1356,12 @@ async def give(interaction: discord.Interaction, member: discord.Member, stat: s
 # ─────────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────────
-bot.run(BOT_TOKEN)
-keep_alive()
+if __name__ == "__main__":
+    keep_alive() # This opens the port Render is looking for
+    try:
+        bot.run(BOT_TOKEN)
+    except Exception as e:
+        print(f"Connection failed: {e}. Heartbeat remains active.")
+        import time
+        while True: # Keeps the process alive so the port stays open
+            time.sleep(3600)
