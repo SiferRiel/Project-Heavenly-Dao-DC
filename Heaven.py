@@ -14,6 +14,24 @@ from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Heavenly Dao is Online"
+
+def run():
+    # Render provides a PORT environment variable automatically
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
 
 load_dotenv()
 # ─────────────────────────────────────────────
@@ -311,6 +329,9 @@ async def on_message(message: discord.Message):
     rank_name = doc.get("rank", get_rank_data(doc.get("qi", 0))["name"])
     rank_index = get_rank_index(rank_name)
 
+    current_rank_data = get_rank_data(doc.get("qi", 0))
+    aperture_cap = current_rank_data["aperture"]
+
     base_qi = random.randint(5, 15)
     qi_gain = int((base_qi + (rank_index**1.95 * 12)) * (1 + (luck / 100)))
 
@@ -320,14 +341,14 @@ async def on_message(message: discord.Message):
     else:
         soul_gain = int(base_souls + ((rank_index - 3)**2.5 * 15))
 
-    new_qi = doc.get("qi", 0) + qi_gain
+    new_qi = min(doc.get("qi", 0) + qi_gain, aperture_cap)
+
     cultivators.update_one(
         {"_id": user_id},
         {
             "$set": {
                 "username": message.author.name,
                 "qi": new_qi,
-                "rank": get_rank_data(new_qi)["name"],
             },
             "$inc": {"souls": soul_gain},
         },
@@ -1221,6 +1242,63 @@ async def sect_create(interaction: discord.Interaction, name: str):
         f"> Treasury offering paid: **5,000 Souls**",
     ], color=0x2a1a0e))
 # ─────────────────────────────────────────────
+# /sect_join, /sect_vault, /sect_distribute
+# ─────────────────────────────────────────────
+@tree.command(name="sect_join", description="Pledge your soul to a Sect.")
+@app_commands.describe(name="The name of the Sect you wish to join.")
+async def sect_join(interaction: discord.Interaction, name: str):
+    doc = get_cultivator(interaction.user.id, interaction.user.name)
+    if sects.find_one({"members": str(interaction.user.id)}):
+        await interaction.response.send_message(embed=denied("You are already bound to a Sect."), ephemeral=True)
+        return
+
+    sect = sects.find_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
+    if not sect:
+        await interaction.response.send_message(embed=denied(f"The Sect '{name}' does not exist."), ephemeral=True)
+        return
+
+    sects.update_one({"_id": sect["_id"]}, {"$push": {"members": str(interaction.user.id)}})
+    await interaction.response.send_message(embed=dao_embed(f"{E['sect']} Sect Joined", [
+        f"**{interaction.user.display_name}** has joined the **{sect['name']}**.",
+        f"> A 10% tithe of all duel winnings will flow to the Vault {E['soul_coin']}."
+    ], color=0x00aaff))
+
+@tree.command(name="sect_vault", description="View the wealth of your Sect.")
+async def sect_vault(interaction: discord.Interaction):
+    sect = sects.find_one({"members": str(interaction.user.id)})
+    if not sect:
+        await interaction.response.send_message(embed=denied("You belong to no Sect."), ephemeral=True)
+        return
+
+    await interaction.response.send_message(embed=dao_embed(f"{E['sect']} {sect['name']} Treasury", [
+        f"**Vault Balance:** {sect.get('vault', 0):,} {E['soul_coin']}",
+        f"**Total Members:** {len(sect['members'])}"
+    ], color=0xffd700))
+
+@tree.command(name="sect_distribute", description="[PATRIARCH] Distribute souls from the vault.")
+@app_commands.describe(member="The member to receive souls", amount="Amount to send")
+async def sect_distribute(interaction: discord.Interaction, member: discord.Member, amount: int):
+    sect = sects.find_one({"patriarch_id": str(interaction.user.id)})
+    if not sect:
+        await interaction.response.send_message(embed=denied("Only a Patriarch may command the Treasury."), ephemeral=True)
+        return
+
+    if amount <= 0 or sect.get("vault", 0) < amount:
+        await interaction.response.send_message(embed=denied("Insufficient souls in the Vault."), ephemeral=True)
+        return
+
+    if str(member.id) not in sect["members"]:
+        await interaction.response.send_message(embed=denied("That individual is not a member of your Sect."), ephemeral=True)
+        return
+
+    sects.update_one({"_id": sect["_id"]}, {"$inc": {"vault": -amount}})
+    cultivators.update_one({"_id": str(member.id)}, {"$inc": {"souls": amount}})
+    await interaction.response.send_message(embed=dao_embed("Treasury Distribution", [
+        f"The Patriarch bestowed **{amount:,}** {E['soul_coin']} upon **{member.display_name}**.",
+        f"Remaining Balance: {sect['vault'] - amount:,} {E['soul_coin']}"
+    ], color=0x00ffaa))
+
+# ─────────────────────────────────────────────
 # /set_logs (Admin-only)
 # ─────────────────────────────────────────────
 @tree.command(name="set_logs", description="[ADMIN] Set the channel for Heavenly Dao logs.")
@@ -1284,3 +1362,4 @@ async def give(interaction: discord.Interaction, member: discord.Member, stat: s
 # RUN
 # ─────────────────────────────────────────────
 bot.run(BOT_TOKEN)
+keep_alive()
